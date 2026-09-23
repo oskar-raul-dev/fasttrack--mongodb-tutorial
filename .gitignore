@@ -1,0 +1,7 @@
+.env
+.DS_Store
+.vscode/
+mongo/backups/*
+!mongo/backups/.gitkeep
+
+*.code-workspace
