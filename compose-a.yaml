@@ -1,0 +1,83 @@
+# =============================================================================
+# mongodb-fasttrack-tutorial — Variante A (un único contenedor)
+# =============================================================================
+# Ejecutar desde la raíz:
+#   docker compose -f compose.yaml config --quiet
+#   docker compose -f compose.yaml up -d --build
+#
+# build.context: . significa que COPY opera desde la raíz del repositorio.
+# build.dockerfile: el Dockerfile se guarda junto con sus scripts auxiliares.
+# Las variables ${...:?...} obligan a definir credenciales y puertos en .env.
+# =============================================================================
+name: mongodb-fasttrack-tutorial
+
+services:
+  mongodb:
+    # Construimos la imagen propia con MongoDB y Mongo Express.
+    build:
+      context: .
+      dockerfile: docker-image-scripts/Dockerfile
+
+    # Nombre legible de la imagen que Compose generará.
+    image: mongo-db-and-express-fasttrack:1.0
+
+    # Nombre del contenedor. No debe repetirse en la variante B.
+    container_name: mongodb-fasttrack-tutorial
+
+    # Recuperación tras reinicios inesperados (salvo parada explícita).
+    restart: unless-stopped
+
+    # Solo se publica en la interfaz loopback del host.
+    # Izquierda = host; derecha = puerto INTERNO del contenedor.
+    ports:
+      - "127.0.0.1:${MONGO_HOST_PORT:?Definir puerto Mongo A}:27017"
+      - "127.0.0.1:${MONGO_EXPRESS_HOST_PORT:?Definir puerto web A}:8081"
+
+    # Usuarios iniciales de MongoDB y configuración de Mongo Express.
+    # Los usuarios root NO se recrean al arrancar un volumen ya inicializado.
+    # La URI contiene credenciales: no publiques 'docker compose config'.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?Usuario requerido}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?Clave requerida}
+
+      # En A Mongo Express comparte red con MongoDB: localhost es correcto.
+      # Si la clave incluye @, :, /, ?, #, etc., codificarla en la URI.
+      ME_CONFIG_MONGODB_URL: "mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@127.0.0.1:27017/?authSource=admin"
+      ME_CONFIG_BASICAUTH_USERNAME: ${ME_CONFIG_BASICAUTH_USERNAME:?Usuario web requerido}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${ME_CONFIG_BASICAUTH_PASSWORD:?Clave web requerida}
+      ME_CONFIG_SITE_BASEURL: "/"
+      ME_CONFIG_SITE_SESSIONSECRET: "mongo-express-fasttrack-secret"
+      VCAP_APP_HOST: "0.0.0.0"
+
+    # Volúmenes con nombre: datos. Bind mount: respaldos inspeccionables.
+    # Los datos sobreviven a 'docker compose down' SIN '-v'.
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+      - ./mongo/backups/single:/backups
+      # Los scripts del repositorio se leen dentro del contenedor.
+      # :ro evita que un proceso del contenedor los modifique.
+      - ./mongo/scripts:/workspace/mongo/scripts:ro
+
+    # Comprueba MongoDB de forma autenticada dentro del contenedor.
+    # '$$' evita que Compose sustituya las variables antes de la ejecución.
+    # No comprueba que la interfaz web esté disponible; usar curl aparte.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          mongosh --quiet --host 127.0.0.1 --port 27017
+          --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin
+          --eval "db.adminCommand({ ping: 1 }).ok"
+          | grep -qx 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# Recursos creados por este proyecto de Compose.
+volumes:
+  mongo_data:
+  mongo_config:

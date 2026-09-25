@@ -1,0 +1,94 @@
+# =============================================================================
+# mongodb-fasttrack-tutorial — Variante B (dos imágenes, dos contenedores)
+# =============================================================================
+# No se construye ninguna imagen propia. Docker Compose descarga dos imágenes
+# oficiales independientes; cada servicio tiene su propio proceso principal.
+# Se usan proyecto, puertos, volúmenes y directorio de respaldo exclusivos.
+# =============================================================================
+name: mongodb-fasttrack-multi
+
+services:
+  mongodb:
+    # Imagen oficial. Mantener explícita la misma línea de MongoDB que A.
+    image: mongo:8.0
+    container_name: mongodb-fasttrack-multi
+    restart: unless-stopped
+
+    # El puerto 27017 interno se publica como 27029 en el host.
+    # Entre contenedores se usa el puerto INTERNO, no 27029.
+    ports:
+      - "127.0.0.1:${MONGO_MULTI_HOST_PORT:?Definir puerto Mongo B}:27017"
+
+    # La imagen oficial crea el usuario administrador en un volumen vacío.
+    # Si ya existe el volumen, cambiar .env NO cambia la contraseña guardada.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?Usuario requerido}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?Clave requerida}
+
+    # Persistencia independiente de la variante A.
+    volumes:
+      - mongo_data_multi:/data/db
+      - mongo_config_multi:/data/configdb
+      - ./mongo/backups/multi:/backups
+      # Igual que en A: scripts locales accesibles mediante --file.
+      - ./mongo/scripts:/workspace/mongo/scripts:ro
+
+    # Red bridge con DNS interno: el otro contenedor usa 'mongodb:27017'.
+    networks:
+      - inventory_net
+
+    # Comprobación autenticada del servidor, no solo del proceso mongod.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          mongosh --quiet --host 127.0.0.1 --port 27017
+          --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin
+          --eval "db.adminCommand({ ping: 1 }).ok"
+          | grep -qx 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mongo-express:
+    # Imagen oficial ya construida: no necesita Node ni Yarn en nuestro host.
+    image: mongo-express:1.0.2
+    container_name: mongo-express-fasttrack-multi
+    restart: unless-stopped
+
+    # Espera a que MongoDB haya superado el healthcheck inicial.
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+    # Puerto HTTP interno 8081 -> 8083 en el host, solo loopback.
+    ports:
+      - "127.0.0.1:${MONGO_EXPRESS_MULTI_HOST_PORT:?Definir puerto web B}:8081"
+
+    # Distinto de A: '127.0.0.1' aquí sería el propio Mongo Express.
+    # Docker Compose resuelve 'mongodb' dentro de inventory_net.
+    # Las contraseñas con caracteres reservados requieren URL encoding.
+    environment:
+      ME_CONFIG_MONGODB_URL: "mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin"
+      ME_CONFIG_BASICAUTH_USERNAME: ${ME_CONFIG_BASICAUTH_USERNAME:?Usuario web requerido}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${ME_CONFIG_BASICAUTH_PASSWORD:?Clave web requerida}
+      ME_CONFIG_SITE_BASEURL: "/"
+      ME_CONFIG_SITE_SESSIONSECRET: "mongo-express-fasttrack-secret"
+      VCAP_APP_HOST: "0.0.0.0"
+
+    # Ambos contenedores deben pertenecer a la misma red lógica.
+    networks:
+      - inventory_net
+
+# La red privada es creada y administrada por este proyecto de Compose.
+networks:
+  inventory_net:
+    driver: bridge
+
+# Volúmenes propios: NO mezclar archivos de dos instancias mongod.
+volumes:
+  mongo_data_multi:
+  mongo_config_multi:
