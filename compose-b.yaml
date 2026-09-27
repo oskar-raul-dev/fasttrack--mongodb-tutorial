@@ -10,7 +10,7 @@ name: mongodb-fasttrack-multi
 services:
   mongodb:
     # Imagen oficial. Mantener explícita la misma línea de MongoDB que A.
-    image: mongo:8.0
+    image: mongo:8.0.20
     container_name: mongodb-fasttrack-multi
     restart: unless-stopped
 

@@ -77,7 +77,7 @@
 # Para una compilación estrictamente reproducible se debe fijar
 # posteriormente un digest concreto.
 
-FROM mongo:8.0
+FROM mongo:8.0.20
 
 
 # =============================================================================
